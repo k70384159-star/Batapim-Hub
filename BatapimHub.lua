@@ -1,6 +1,5 @@
 --// BATAPIM HUB - PUMPKIN FARM
---// Выбор цветов + движение к деталям
---// Без автокопания и удержания ProximityPrompt
+--// Поиск по размерам + автоудержание ProximityPrompt
 
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
@@ -13,6 +12,7 @@ local STOP_DISTANCE = 3
 local SCAN_DELAY = 0.35
 local CAMERA_HEIGHT = 25
 local TOOL_NUMBER = 4
+local THICKNESS_TOLERANCE = 0.35
 
 local running = false
 local autoReset = true
@@ -21,23 +21,6 @@ local wasErrorVisible = false
 local destroyed = false
 local oldCamera = nil
 
--- ВЫБРАННЫЕ ЦВЕТА
-local selectedColors = {}
-
-local colorList = {
-    {name = "Красный", color = Color3.fromRGB(230, 55, 55)},
-    {name = "Оранжевый", color = Color3.fromRGB(240, 135, 40)},
-    {name = "Жёлтый", color = Color3.fromRGB(240, 220, 50)},
-    {name = "Зелёный", color = Color3.fromRGB(55, 200, 80)},
-    {name = "Голубой", color = Color3.fromRGB(50, 200, 220)},
-    {name = "Синий", color = Color3.fromRGB(55, 100, 230)},
-    {name = "Фиолетовый", color = Color3.fromRGB(150, 65, 210)},
-    {name = "Розовый", color = Color3.fromRGB(240, 100, 170)},
-    {name = "Белый", color = Color3.fromRGB(240, 240, 240)},
-    {name = "Серый", color = Color3.fromRGB(130, 130, 130)},
-    {name = "Чёрный", color = Color3.fromRGB(30, 30, 30)}
-}
-
 --// GUI
 local gui = Instance.new("ScreenGui")
 gui.Name = "BatapimHub"
@@ -45,8 +28,8 @@ gui.ResetOnSpawn = false
 gui.Parent = CoreGui
 
 local main = Instance.new("Frame")
-main.Size = UDim2.fromOffset(300, 445)
-main.Position = UDim2.new(0.5, -150, 0.5, -222)
+main.Size = UDim2.fromOffset(300, 300)
+main.Position = UDim2.new(0.5, -150, 0.5, -150)
 main.BackgroundColor3 = Color3.fromRGB(22, 27, 32)
 main.BorderSizePixel = 0
 main.Active = true
@@ -143,108 +126,16 @@ local resetButton = makeButton(
     Color3.fromRGB(55, 105, 75)
 )
 
-local colorTitle = Instance.new("TextLabel")
-colorTitle.Size = UDim2.new(1, -28, 0, 22)
-colorTitle.Position = UDim2.fromOffset(14, 226)
-colorTitle.BackgroundTransparency = 1
-colorTitle.Text = "ВЫБЕРИ ЦВЕТА ЦЕЛИ"
-colorTitle.TextColor3 = Color3.fromRGB(180, 220, 185)
-colorTitle.TextSize = 12
-colorTitle.Font = Enum.Font.GothamBold
-colorTitle.TextXAlignment = Enum.TextXAlignment.Left
-colorTitle.Parent = main
-
-local colorScroll = Instance.new("ScrollingFrame")
-colorScroll.Size = UDim2.new(1, -28, 0, 137)
-colorScroll.Position = UDim2.fromOffset(14, 250)
-colorScroll.BackgroundColor3 = Color3.fromRGB(29, 35, 39)
-colorScroll.BorderSizePixel = 0
-colorScroll.ScrollBarThickness = 4
-colorScroll.CanvasSize = UDim2.fromOffset(0, 0)
-colorScroll.Parent = main
-
-Instance.new("UICorner", colorScroll).CornerRadius = UDim.new(0, 10)
-
-local grid = Instance.new("UIGridLayout")
-grid.CellSize = UDim2.new(0.5, -5, 0, 32)
-grid.CellPadding = UDim2.fromOffset(6, 5)
-grid.Parent = colorScroll
-
-grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    colorScroll.CanvasSize = UDim2.fromOffset(
-        0,
-        grid.AbsoluteContentSize.Y + 8
-    )
-end)
-
-local colorButtons = {}
-
-local function updateColorButton(name)
-    local button = colorButtons[name]
-    if not button then return end
-
-    if selectedColors[name] then
-        button.Text = "✓ " .. name
-        button.BackgroundColor3 = Color3.fromRGB(49, 125, 75)
-    else
-        button.Text = name
-        button.BackgroundColor3 = Color3.fromRGB(55, 62, 67)
-    end
-end
-
-for _, info in ipairs(colorList) do
-    local button = makeButton(
-        colorScroll,
-        info.name,
-        UDim2.new(0, 100, 0, 32),
-        UDim2.new(),
-        Color3.fromRGB(55, 62, 67)
-    )
-
-    button.TextSize = 11
-    button.TextColor3 = info.color
-
-    colorButtons[info.name] = button
-
-    button.MouseButton1Click:Connect(function()
-        selectedColors[info.name] = not selectedColors[info.name]
-        updateColorButton(info.name)
-    end)
-end
-
-local allButton = makeButton(
-    main, "ВЫБРАТЬ ВСЕ ЦВЕТА",
-    UDim2.new(1, -28, 0, 30),
-    UDim2.fromOffset(14, 393),
-    Color3.fromRGB(65, 85, 105)
-)
-allButton.TextSize = 11
-
 local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1, -28, 0, 18)
-status.Position = UDim2.fromOffset(14, 422)
+status.Size = UDim2.new(1, -28, 0, 42)
+status.Position = UDim2.fromOffset(14, 235)
 status.BackgroundTransparency = 1
-status.Text = "● Выбери цвета"
+status.Text = "● Готов к поиску"
 status.TextColor3 = Color3.fromRGB(190, 205, 195)
 status.TextSize = 11
 status.Font = Enum.Font.Gotham
+status.TextWrapped = true
 status.Parent = main
-
-allButton.MouseButton1Click:Connect(function()
-    local allSelected = true
-
-    for _, info in ipairs(colorList) do
-        if not selectedColors[info.name] then
-            allSelected = false
-            break
-        end
-    end
-
-    for _, info in ipairs(colorList) do
-        selectedColors[info.name] = not allSelected
-        updateColorButton(info.name)
-    end
-end)
 
 --// СВОРАЧИВАНИЕ
 local miniButton = makeButton(
@@ -292,7 +183,7 @@ end
 local function saveCamera()
     local camera = workspace.CurrentCamera
 
-    if not oldCamera then
+    if not oldCamera and camera then
         oldCamera = {
             Type = camera.CameraType,
             Subject = camera.CameraSubject,
@@ -305,12 +196,14 @@ end
 local function setTopCamera()
     local camera = workspace.CurrentCamera
     local root = getRoot()
+
     if not camera or not root then return end
 
     saveCamera()
     camera.CameraType = Enum.CameraType.Scriptable
 
-    local cameraPosition = root.Position + Vector3.new(0, CAMERA_HEIGHT, 0)
+    local cameraPosition =
+        root.Position + Vector3.new(0, CAMERA_HEIGHT, 0)
 
     camera.CFrame = CFrame.lookAt(
         cameraPosition,
@@ -323,10 +216,13 @@ local function restoreCamera()
     if not oldCamera then return end
 
     local camera = workspace.CurrentCamera
-    camera.CameraType = oldCamera.Type
-    camera.CameraSubject = oldCamera.Subject
-    camera.CFrame = oldCamera.CFrame
-    camera.FieldOfView = oldCamera.FOV
+
+    if camera then
+        camera.CameraType = oldCamera.Type
+        camera.CameraSubject = oldCamera.Subject
+        camera.CFrame = oldCamera.CFrame
+        camera.FieldOfView = oldCamera.FOV
+    end
 
     oldCamera = nil
 end
@@ -352,39 +248,7 @@ local function equipTool()
     end
 end
 
---// ОПРЕДЕЛЕНИЕ ЦВЕТА
-local function getColorName(color)
-    local h, s, v = Color3.toHSV(color)
-
-    if s < 0.20 then
-        if v > 0.85 then
-            return "Белый"
-        elseif v < 0.18 then
-            return "Чёрный"
-        else
-            return "Серый"
-        end
-    end
-
-    if h < 0.035 or h >= 0.96 then
-        return "Красный"
-    elseif h < 0.09 then
-        return "Оранжевый"
-    elseif h < 0.17 then
-        return "Жёлтый"
-    elseif h < 0.42 then
-        return "Зелёный"
-    elseif h < 0.53 then
-        return "Голубой"
-    elseif h < 0.70 then
-        return "Синий"
-    elseif h < 0.86 then
-        return "Фиолетовый"
-    else
-        return "Розовый"
-    end
-end
-
+--// ИСКЛЮЧЕНИЕ ЧАСТЕЙ ИГРОКОВ
 local function isPlayerPart(obj)
     local current = obj
 
@@ -400,23 +264,30 @@ local function isPlayerPart(obj)
     return false
 end
 
---// ПОИСК ЦЕЛИ ПО ЦВЕТУ
+--// ПОИСК ДЕТАЛЕЙ ПО РАЗМЕРАМ
 local function findTarget()
     local root = getRoot()
-    if not root then return nil end
+    local character = getCharacter()
 
-    local anySelected = false
+    if not root or not character then return nil end
 
-    for _, value in pairs(selectedColors) do
-        if value then
-            anySelected = true
-            break
-        end
-    end
+    local torso = character:FindFirstChild("UpperTorso")
+        or character:FindFirstChild("Torso")
 
-    if not anySelected then
-        return nil
-    end
+    if not torso then return nil end
+
+    -- Полная высота персонажа
+    local bodyHeight = character:GetExtentsSize().Y
+
+    -- Толщина туловища (живота)
+    local bodyThickness = math.min(
+        torso.Size.X,
+        torso.Size.Z
+    )
+
+    -- Высота детали: больше 1/3 и меньше 2/3 тела
+    local minHeight = bodyHeight / 3
+    local maxHeight = bodyHeight / 1.5
 
     local bestTarget = nil
     local bestDistance = math.huge
@@ -427,15 +298,22 @@ local function findTarget()
             and obj.Size.Magnitude > 0.5
             and not isPlayerPart(obj) then
 
-            local colorName = getColorName(obj.Color)
+            local height = obj.Size.Y
+            local thickness = math.min(
+                obj.Size.X,
+                obj.Size.Z
+            )
 
-            if selectedColors[colorName] then
-                local pos = obj.Position
+            local correctHeight =
+                height > minHeight and height < maxHeight
 
-                -- Расстояние только по X и Z.
-                -- Высота Y не учитывается.
-                local dx = pos.X - root.Position.X
-                local dz = pos.Z - root.Position.Z
+            local correctThickness =
+                math.abs(thickness - bodyThickness)
+                <= bodyThickness * THICKNESS_TOLERANCE
+
+            if correctHeight and correctThickness then
+                local dx = obj.Position.X - root.Position.X
+                local dz = obj.Position.Z - root.Position.Z
                 local distance = math.sqrt(dx * dx + dz * dz)
 
                 if distance <= SEARCH_RADIUS
@@ -449,6 +327,100 @@ local function findTarget()
     end
 
     return bestTarget
+end
+
+--// АВТОМАТИЧЕСКОЕ УДЕРЖАНИЕ PROMPT
+local currentPrompt = nil
+local promptHoldActive = false
+
+local function releasePrompt()
+    if currentPrompt and promptHoldActive then
+        pcall(function()
+            currentPrompt:InputHoldEnd()
+        end)
+    end
+
+    currentPrompt = nil
+    promptHoldActive = false
+end
+
+local function getPromptPart(prompt)
+    local parent = prompt.Parent
+
+    if not parent then return nil end
+
+    if parent:IsA("Attachment") then
+        parent = parent.Parent
+    end
+
+    if parent and parent:IsA("BasePart") then
+        return parent
+    end
+
+    return nil
+end
+
+local function findNearbyPrompt()
+    local root = getRoot()
+    if not root then return nil end
+
+    local closestPrompt = nil
+    local closestDistance = math.huge
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("ProximityPrompt")
+            and obj.Enabled
+            and obj.HoldDuration > 0 then
+
+            local part = getPromptPart(obj)
+
+            if part then
+                local distance =
+                    (part.Position - root.Position).Magnitude
+
+                if distance <= obj.MaxActivationDistance
+                    and distance < closestDistance then
+
+                    closestDistance = distance
+                    closestPrompt = obj
+                end
+            end
+        end
+    end
+
+    return closestPrompt
+end
+
+local function updatePrompt()
+    if not running then
+        releasePrompt()
+        return
+    end
+
+    local prompt = findNearbyPrompt()
+
+    if prompt ~= currentPrompt then
+        releasePrompt()
+
+        if prompt then
+            currentPrompt = prompt
+
+            local success = pcall(function()
+                prompt:InputHoldBegin()
+            end)
+
+            promptHoldActive = success
+
+            if not success then
+                currentPrompt = nil
+            end
+        end
+    elseif currentPrompt then
+        if not currentPrompt.Parent
+            or not currentPrompt.Enabled then
+            releasePrompt()
+        end
+    end
 end
 
 --// ПРОВЕРКА СООБЩЕНИЙ ДЛЯ AUTO RESET
@@ -487,6 +459,8 @@ end
 
 --// AUTO RESET
 local function doAutoReset()
+    releasePrompt()
+
     local humanoid = getHumanoid()
     if not humanoid then return end
 
@@ -497,6 +471,7 @@ end
 --// STOP
 local function stopFarm()
     running = false
+    releasePrompt()
 
     local humanoid = getHumanoid()
     local root = getRoot()
@@ -515,25 +490,10 @@ end
 local function startFarm()
     if running then return end
 
-    local hasSelection = false
-
-    for _, value in pairs(selectedColors) do
-        if value then
-            hasSelection = true
-            break
-        end
-    end
-
-    if not hasSelection then
-        status.Text = "● Сначала выбери цвет!"
-        status.TextColor3 = Color3.fromRGB(255, 170, 100)
-        return
-    end
-
     running = true
     wasErrorVisible = false
 
-    status.Text = "● Ищем детали..."
+    status.Text = "● Ищем детали по размеру..."
     status.TextColor3 = Color3.fromRGB(130, 235, 150)
 
     equipTool()
@@ -576,6 +536,9 @@ task.spawn(function()
                     equipTool()
                 end
 
+                -- Ищем и удерживаем ближайшую доступную кнопку
+                updatePrompt()
+
                 local errorVisible = errorTextVisible()
 
                 if autoReset and errorVisible and not wasErrorVisible then
@@ -595,7 +558,6 @@ task.spawn(function()
                     local distance = math.sqrt(dx * dx + dz * dz)
 
                     if distance > STOP_DISTANCE then
-                        -- Идём к X/Z цели, но сохраняем свою высоту Y.
                         humanoid:MoveTo(Vector3.new(
                             pos.X,
                             root.Position.Y,
@@ -605,21 +567,28 @@ task.spawn(function()
                         status.Text = "● Идём к детали"
                     else
                         humanoid:MoveTo(root.Position)
-                        status.Text = "● Над деталью — копай!"
+                        status.Text = "● Рядом с деталью"
                     end
                 else
                     humanoid:MoveTo(root.Position)
                     status.Text = "● Подходящих деталей нет"
                 end
+            else
+                releasePrompt()
             end
+        else
+            releasePrompt()
         end
 
         task.wait(SCAN_DELAY)
     end
+
+    releasePrompt()
 end)
 
 --// ПРИ ВОЗРОЖДЕНИИ
 player.CharacterAdded:Connect(function()
+    releasePrompt()
     selectedTool = nil
     wasErrorVisible = false
 
