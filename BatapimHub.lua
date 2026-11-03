@@ -1,5 +1,6 @@
+print("Batapim Hub - PUMPKIN FARM loaded!")
 --// BATAPIM HUB - PUMPKIN FARM
---// Поиск по размерам + автоудержание ProximityPrompt
+--// Повторный подбор до 3 раз
 
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
@@ -12,7 +13,9 @@ local STOP_DISTANCE = 3
 local SCAN_DELAY = 0.35
 local CAMERA_HEIGHT = 25
 local TOOL_NUMBER = 4
-local THICKNESS_TOLERANCE = 0.35
+
+local MAX_PICKUP_ATTEMPTS = 3
+local RETRY_DELAY = 1
 
 local running = false
 local autoReset = true
@@ -21,7 +24,37 @@ local wasErrorVisible = false
 local destroyed = false
 local oldCamera = nil
 
---// GUI
+-- НАЗВАНИЯ ЦЕЛЕЙ
+local TARGET_NAMES = {
+    ["Skull Lucky Block (2/2)"] = true,
+    ["Skull Lucky Block (1/2)"] = true,
+
+    ["Money Money Cat (3/3)"] = true,
+    ["Money Money Cat (2/3)"] = true,
+    ["Money Money Cat (1/3)"] = true,
+
+    ["Fang Fang Draculang (3/3)"] = true,
+    ["Fang Fang Draculang (2/3)"] = true,
+    ["Fang Fang Draculang (1/3)"] = true,
+
+    ["Pum Pum Pum (4/4)"] = true,
+    ["Pum Pum Pum (3/4)"] = true,
+    ["Pum Pum Pum (2/4)"] = true,
+    ["Pum Pum Pum (1/4)"] = true,
+
+    ["Spooketti Tualetti (5/5)"] = true,
+    ["Spooketti Tualetti (4/5)"] = true,
+    ["Spooketti Tualetti (3/5)"] = true,
+    ["Spooketti Tualetti (2/5)"] = true,
+    ["Spooketti Tualetti (1/5)"] = true,
+
+    ["Spooky Spooky Sahur (4/4)"] = true,
+    ["Spooky Spooky Sahur (3/4)"] = true,
+    ["Spooky Spooky Sahur (2/4)"] = true,
+    ["Spooky Spooky Sahur (1/4)"] = true
+}
+
+-- GUI
 local gui = Instance.new("ScreenGui")
 gui.Name = "BatapimHub"
 gui.ResetOnSpawn = false
@@ -137,7 +170,7 @@ status.Font = Enum.Font.Gotham
 status.TextWrapped = true
 status.Parent = main
 
---// СВОРАЧИВАНИЕ
+-- СВОРАЧИВАНИЕ
 local miniButton = makeButton(
     gui, "🎃",
     UDim2.fromOffset(53, 53),
@@ -164,7 +197,7 @@ end
 collapseButton.MouseButton1Click:Connect(collapse)
 miniButton.MouseButton1Click:Connect(expand)
 
---// ПЕРСОНАЖ
+-- ПЕРСОНАЖ
 local function getCharacter()
     return player.Character
 end
@@ -179,7 +212,23 @@ local function getHumanoid()
     return character and character:FindFirstChildOfClass("Humanoid")
 end
 
---// КАМЕРА
+-- ПРОВЕРКА ЧАСТЕЙ ИГРОКОВ
+local function isPlayerPart(obj)
+    local current = obj
+
+    while current and current ~= workspace do
+        if current:IsA("Model")
+            and current:FindFirstChildOfClass("Humanoid") then
+            return true
+        end
+
+        current = current.Parent
+    end
+
+    return false
+end
+
+-- КАМЕРА
 local function saveCamera()
     local camera = workspace.CurrentCamera
 
@@ -227,7 +276,7 @@ local function restoreCamera()
     oldCamera = nil
 end
 
---// ВЫБОР ЧЕТВЁРТОГО TOOL
+-- ЧЕТВЁРТЫЙ TOOL
 local function equipTool()
     local backpack = player:FindFirstChild("Backpack")
     local humanoid = getHumanoid()
@@ -248,79 +297,148 @@ local function equipTool()
     end
 end
 
---// ИСКЛЮЧЕНИЕ ЧАСТЕЙ ИГРОКОВ
-local function isPlayerPart(obj)
+-- ПОЛУЧЕНИЕ ПОЗИЦИИ ОБЪЕКТА
+local function getObjectPosition(obj)
+    if not obj then return nil end
+
+    if obj:IsA("BasePart") then
+        return obj.Position
+    end
+
+    if obj:IsA("Model") then
+        return obj:GetPivot().Position
+    end
+
+    if obj:IsA("Attachment") then
+        return obj.WorldPosition
+    end
+
+    return nil
+end
+
+-- ПОЛУЧЕНИЕ ОБЪЕКТА ИЗ НАДПИСИ
+local function getWorldObject(obj)
     local current = obj
 
     while current and current ~= workspace do
-        if current:IsA("Model")
-            and current:FindFirstChildOfClass("Humanoid") then
-            return true
+        if current:IsA("BillboardGui")
+            or current:IsA("SurfaceGui") then
+
+            local adornee = current.Adornee
+
+            if adornee then
+                if adornee:IsA("Attachment") then
+                    adornee = adornee.Parent
+                end
+
+                if adornee and (
+                    adornee:IsA("BasePart")
+                    or adornee:IsA("Model")
+                ) and not isPlayerPart(adornee) then
+                    return adornee
+                end
+            end
         end
 
         current = current.Parent
     end
 
+    current = obj
+
+    while current and current ~= workspace do
+        if current:IsA("Model")
+            or current:IsA("BasePart") then
+
+            if not isPlayerPart(current) then
+                return current
+            end
+        end
+
+        current = current.Parent
+    end
+
+    return nil
+end
+
+-- НОРМАЛИЗАЦИЯ ТЕКСТА
+local function normalizeText(value)
+    if type(value) ~= "string" then
+        return ""
+    end
+
+    value = string.lower(value)
+    value = string.gsub(value, "%s+", " ")
+    value = string.gsub(value, "^%s+", "")
+    value = string.gsub(value, "%s+$", "")
+
+    return value
+end
+
+local normalizedNames = {}
+
+for name in pairs(TARGET_NAMES) do
+    normalizedNames[normalizeText(name)] = true
+end
+
+-- ПРОВЕРКА НАЗВАНИЯ
+local function matchesTargetName(value)
+    local text = normalizeText(value)
+
+    if normalizedNames[text] then
+        return true
+    end
+
+    for name in pairs(normalizedNames) do
+        if string.find(text, name, 1, true) then
+            return true
+        end
+    end
+
     return false
 end
 
---// ПОИСК ДЕТАЛЕЙ ПО РАЗМЕРАМ
+-- ПОИСК ЦЕЛИ
 local function findTarget()
     local root = getRoot()
-    local character = getCharacter()
-
-    if not root or not character then return nil end
-
-    local torso = character:FindFirstChild("UpperTorso")
-        or character:FindFirstChild("Torso")
-
-    if not torso then return nil end
-
-    -- Полная высота персонажа
-    local bodyHeight = character:GetExtentsSize().Y
-
-    -- Толщина туловища (живота)
-    local bodyThickness = math.min(
-        torso.Size.X,
-        torso.Size.Z
-    )
-
-    -- Высота детали: больше 1/3 и меньше 2/3 тела
-    local minHeight = bodyHeight / 3
-    local maxHeight = bodyHeight / 1.5
+    if not root then return nil end
 
     local bestTarget = nil
     local bestDistance = math.huge
 
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart")
-            and obj.Transparency < 0.95
-            and obj.Size.Magnitude > 0.5
-            and not isPlayerPart(obj) then
+        local matched = false
 
-            local height = obj.Size.Y
-            local thickness = math.min(
-                obj.Size.X,
-                obj.Size.Z
-            )
+        if matchesTargetName(obj.Name) then
+            matched = true
+        end
 
-            local correctHeight =
-                height > minHeight and height < maxHeight
+        if not matched and (
+            obj:IsA("TextLabel")
+            or obj:IsA("TextButton")
+            or obj:IsA("TextBox")
+        ) then
+            if matchesTargetName(obj.Text) then
+                matched = true
+            end
+        end
 
-            local correctThickness =
-                math.abs(thickness - bodyThickness)
-                <= bodyThickness * THICKNESS_TOLERANCE
+        if matched then
+            local target = getWorldObject(obj)
 
-            if correctHeight and correctThickness then
-                local dx = obj.Position.X - root.Position.X
-                local dz = obj.Position.Z - root.Position.Z
-                local distance = math.sqrt(dx * dx + dz * dz)
+            if target then
+                local position = getObjectPosition(target)
 
-                if distance <= SEARCH_RADIUS
-                    and distance < bestDistance then
+                if position then
+                    local dx = position.X - root.Position.X
+                    local dz = position.Z - root.Position.Z
+                    local distance = math.sqrt(dx * dx + dz * dz)
 
-                    bestDistance = distance
-                    bestTarget = obj
+                    if distance <= SEARCH_RADIUS
+                        and distance < bestDistance then
+
+                        bestDistance = distance
+                        bestTarget = target
+                    end
                 end
             end
         end
@@ -329,9 +447,13 @@ local function findTarget()
     return bestTarget
 end
 
---// АВТОМАТИЧЕСКОЕ УДЕРЖАНИЕ PROMPT
+-- ПОДБОР С ПОВТОРНЫМИ ПОПЫТКАМИ
 local currentPrompt = nil
 local promptHoldActive = false
+local promptAttempts = 0
+local promptPhase = "start"
+local nextPromptAction = 0
+local failedPrompt = nil
 
 local function releasePrompt()
     if currentPrompt and promptHoldActive then
@@ -342,6 +464,9 @@ local function releasePrompt()
 
     currentPrompt = nil
     promptHoldActive = false
+    promptAttempts = 0
+    promptPhase = "start"
+    nextPromptAction = 0
 end
 
 local function getPromptPart(prompt)
@@ -364,13 +489,19 @@ local function findNearbyPrompt()
     local root = getRoot()
     if not root then return nil end
 
+    if failedPrompt and (
+        not failedPrompt.Parent or not failedPrompt.Enabled
+    ) then
+        failedPrompt = nil
+    end
+
     local closestPrompt = nil
     local closestDistance = math.huge
 
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("ProximityPrompt")
             and obj.Enabled
-            and obj.HoldDuration > 0 then
+            and obj ~= failedPrompt then
 
             local part = getPromptPart(obj)
 
@@ -404,26 +535,63 @@ local function updatePrompt()
 
         if prompt then
             currentPrompt = prompt
-
-            local success = pcall(function()
-                prompt:InputHoldBegin()
-            end)
-
-            promptHoldActive = success
-
-            if not success then
-                currentPrompt = nil
-            end
+            promptPhase = "start"
+            promptAttempts = 0
+            nextPromptAction = 0
         end
-    elseif currentPrompt then
-        if not currentPrompt.Parent
-            or not currentPrompt.Enabled then
+    end
+
+    if not currentPrompt then return end
+
+    if not currentPrompt.Parent or not currentPrompt.Enabled then
+        releasePrompt()
+        return
+    end
+
+    if os.clock() < nextPromptAction then
+        return
+    end
+
+    if promptPhase == "start" then
+        promptAttempts = promptAttempts + 1
+
+        local success = pcall(function()
+            currentPrompt:InputHoldBegin()
+        end)
+
+        if success then
+            promptHoldActive = true
+            promptPhase = "release"
+
+            nextPromptAction = os.clock()
+                + math.max(currentPrompt.HoldDuration, 0.35)
+                + 0.35
+        else
+            promptPhase = "wait"
+            nextPromptAction = os.clock() + RETRY_DELAY
+        end
+
+    elseif promptPhase == "release" then
+        pcall(function()
+            currentPrompt:InputHoldEnd()
+        end)
+
+        promptHoldActive = false
+        promptPhase = "wait"
+        nextPromptAction = os.clock() + RETRY_DELAY
+
+    elseif promptPhase == "wait" then
+        if promptAttempts < MAX_PICKUP_ATTEMPTS then
+            promptPhase = "start"
+            nextPromptAction = os.clock()
+        else
+            failedPrompt = currentPrompt
             releasePrompt()
         end
     end
 end
 
---// ПРОВЕРКА СООБЩЕНИЙ ДЛЯ AUTO RESET
+-- ПРОВЕРКА СООБЩЕНИЙ ДЛЯ AUTO RESET
 local function errorTextVisible()
     local messages = {
         "you can't dig here!",
@@ -457,7 +625,7 @@ local function errorTextVisible()
     return false
 end
 
---// AUTO RESET
+-- AUTO RESET
 local function doAutoReset()
     releasePrompt()
 
@@ -468,10 +636,11 @@ local function doAutoReset()
     humanoid:ChangeState(Enum.HumanoidStateType.Dead)
 end
 
---// STOP
+-- STOP
 local function stopFarm()
     running = false
     releasePrompt()
+    failedPrompt = nil
 
     local humanoid = getHumanoid()
     local root = getRoot()
@@ -486,21 +655,22 @@ local function stopFarm()
     status.TextColor3 = Color3.fromRGB(220, 170, 170)
 end
 
---// START
+-- START
 local function startFarm()
     if running then return end
 
     running = true
     wasErrorVisible = false
+    failedPrompt = nil
 
-    status.Text = "● Ищем детали по размеру..."
+    status.Text = "● Ищем объекты по названию..."
     status.TextColor3 = Color3.fromRGB(130, 235, 150)
 
     equipTool()
     setTopCamera()
 end
 
---// КНОПКИ
+-- КНОПКИ
 startButton.MouseButton1Click:Connect(startFarm)
 stopButton.MouseButton1Click:Connect(stopFarm)
 
@@ -522,7 +692,7 @@ closeButton.MouseButton1Click:Connect(function()
     gui:Destroy()
 end)
 
---// ОСНОВНОЙ ЦИКЛ
+-- ОСНОВНОЙ ЦИКЛ
 task.spawn(function()
     while not destroyed and gui.Parent do
         if running then
@@ -536,7 +706,6 @@ task.spawn(function()
                     equipTool()
                 end
 
-                -- Ищем и удерживаем ближайшую доступную кнопку
                 updatePrompt()
 
                 local errorVisible = errorTextVisible()
@@ -551,27 +720,29 @@ task.spawn(function()
                 local target = findTarget()
 
                 if target and target.Parent then
-                    local pos = target.Position
+                    local pos = getObjectPosition(target)
 
-                    local dx = pos.X - root.Position.X
-                    local dz = pos.Z - root.Position.Z
-                    local distance = math.sqrt(dx * dx + dz * dz)
+                    if pos then
+                        local dx = pos.X - root.Position.X
+                        local dz = pos.Z - root.Position.Z
+                        local distance = math.sqrt(dx * dx + dz * dz)
 
-                    if distance > STOP_DISTANCE then
-                        humanoid:MoveTo(Vector3.new(
-                            pos.X,
-                            root.Position.Y,
-                            pos.Z
-                        ))
+                        if distance > STOP_DISTANCE then
+                            humanoid:MoveTo(Vector3.new(
+                                pos.X,
+                                root.Position.Y,
+                                pos.Z
+                            ))
 
-                        status.Text = "● Идём к детали"
-                    else
-                        humanoid:MoveTo(root.Position)
-                        status.Text = "● Рядом с деталью"
+                            status.Text = "● Идём к: " .. target.Name
+                        else
+                            humanoid:MoveTo(root.Position)
+                            status.Text = "● Найден: " .. target.Name
+                        end
                     end
                 else
                     humanoid:MoveTo(root.Position)
-                    status.Text = "● Подходящих деталей нет"
+                    status.Text = "● Подходящих объектов нет"
                 end
             else
                 releasePrompt()
@@ -586,9 +757,10 @@ task.spawn(function()
     releasePrompt()
 end)
 
---// ПРИ ВОЗРОЖДЕНИИ
+-- ПРИ ВОЗРОЖДЕНИИ
 player.CharacterAdded:Connect(function()
     releasePrompt()
+    failedPrompt = nil
     selectedTool = nil
     wasErrorVisible = false
 
